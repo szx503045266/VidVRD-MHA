@@ -3,13 +3,13 @@ import h5py
 
 import os
 import time
-import cPickle as pkl
+import pickle as pkl
 import atexit, signal
 from time import strftime, sleep
 from itertools import cycle, product
 from multiprocessing import Process, Queue, sharedctypes
 
-from trajectory import traj_iou, object_trajectory_proposal
+from .trajectory import traj_iou, object_trajectory_proposal
 from baseline import *
 
 
@@ -25,7 +25,7 @@ class SharedArray(object):
             typecode = 'd'
         else:
             assert False, 'Unknown dtype.'
-        self.data = sharedctypes.RawArray(typecode, size)
+        self.data = sharedctypes.RawArray(typecode, int(size))
         self.shape = shape
         self.dtype = dtype
 

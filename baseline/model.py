@@ -15,7 +15,7 @@ from keras.engine.topology import Layer
 from keras.optimizers import SGD, Adam
 from keras import backend as K
 
-from feature import FeatureExtractor
+from .feature import FeatureExtractor
 from baseline import *
 
 
@@ -114,7 +114,7 @@ class DataGenerator(FeatureExtractor):
             r = []
             remaining_size = self.batch_size
             while remaining_size > 0:
-                i = self.ind_iter.next()
+                i = next(self.ind_iter)
                 vid, fstart, fend = self.index[i]
                 sample_num = np.minimum(remaining_size, self.max_sampling_in_batch)
                 _f, _r = self._data_sampling(vid, fstart, fend, sample_num)
@@ -127,8 +127,8 @@ class DataGenerator(FeatureExtractor):
             return f, r
         else:
             try:
-                i = self.ind_iter.next()
-            except StopIteration, e:
+                i = next(self.ind_iter)
+            except StopIteration as e:
                 return None
             index = self.index[i]
             pairs, feats, iou, trackid = self.extract_feature( *index)
@@ -190,7 +190,7 @@ def build_model(dataset, param):
 
     p = Dense(units=param['predicate_num'])(inp_f)
 
-    sel_inds = np.asarray(_train_triplet_id.keys(), dtype='int32').T
+    sel_inds = np.asarray(list(_train_triplet_id.keys()), dtype='int32').T
     r = SelectionLayer(sel_inds)([prob_s, p, prob_o])
     prob = Activation('softmax')(r)
 
