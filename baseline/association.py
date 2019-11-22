@@ -15,7 +15,7 @@ from .trajectory import traj_iou, object_trajectory_proposal
 
 def _merge_trajs(traj_1, traj_2):
     try:
-        assert traj_1.pend > traj_2.pstart and traj_1.pstart < traj_2.pend
+        assert traj_1.pend >= traj_2.pstart and traj_1.pstart < traj_2.pend
     except AssertionError:
         print('{}-{} {}-{}'.format(traj_1.pstart, traj_1.pend, traj_2.pstart, traj_2.pend))
     overlap_length = max(traj_1.pend - traj_2.pstart, 0)
@@ -91,8 +91,10 @@ class VideoRelation(object):
             return False
 
     def extend(self, straj, otraj, confs):
+        #print(self.straj.rois[15], straj.rois[0])
         self.straj = _merge_trajs(self.straj, straj)
         self.otraj = _merge_trajs(self.otraj, otraj)
+        #print(self.straj.rois[15])
         self.confs_list.append(confs)
         self.fstart = self.straj.pstart
         self.fend = self.otraj.pend
@@ -111,10 +113,12 @@ class VideoRelation(object):
         ]
         obj['sub_traj'] = self.straj.serialize()['rois']
         obj['obj_traj'] = self.otraj.serialize()['rois']
+        #print(obj['triplet'],obj['score'])
+        #print(obj['sub_traj'][15])
         return obj
 
 
-def greedy_relational_association(dataset, short_term_relations, max_traj_num_in_clip=100):
+def greedy_association(dataset, short_term_relations, max_traj_num_in_clip=100):
     short_term_relations.sort(key=lambda x: int(x[0][1]))
     video_relation_list = []
     last_modify_rel_list = []
@@ -144,6 +148,12 @@ def greedy_relational_association(dataset, short_term_relations, max_traj_num_in
                 r = VideoRelation(vid, s_cid, pid, o_cid, straj, otraj, confs=conf_score)
                 video_relation_list.append(r)
                 cur_modify_rel_list.append(r)
+                if pred[1] == (21,72,9):
+                    print(dataset.get_object_name(21),
+                          dataset.get_predicate_name(72),
+                          dataset.get_object_name(9))
+                    print("first:",r.straj.rois[15], r.confs_list)
+                    print()
         else:
             for pred_idx, pred in enumerate(sorted_pred_list):
                 conf_score = pred[0]
@@ -151,19 +161,35 @@ def greedy_relational_association(dataset, short_term_relations, max_traj_num_in
                 s_tididx, o_tididx = pred[2]
                 straj = trajs[s_tididx]
                 otraj = trajs[o_tididx]
+                if pred[1] == (21,72,9):
+                    print("before1:", pred[1],straj.rois[0], conf_score)
                 last_modify_rel_list.sort(key=lambda r: r.mean_confs(), reverse=True)
                 is_merged = False
                 for r in last_modify_rel_list:
+                    if r.triplet() == (21,72,9):
+                        print("before2:", pred[1],r.straj.rois[15], r.confs_list)
+                        print()
                     if pred[1] == r.triplet():
+                        #print("in", pred[1], r.confs_list, conf_score)
                         if (straj.pstart < r.fend and otraj.pstart < r.fend) \
                                 and r.both_overlap(straj,otraj):
+                            #print(pred[1],conf_score)
+                            if pred[1] == (21,72,9):
+                                print(dataset.get_object_name(21),
+                                      dataset.get_predicate_name(72),
+                                      dataset.get_object_name(9))
+                                print("before:",r.straj.rois[15], straj.rois[0])
+                                print('\t', r.confs_list)
                             r.extend(straj, otraj, conf_score)
+                            if pred[1] == (21,72,9):
+                                print("after:",r.straj.rois[15])
+                                print('\t', r.confs_list)
                             last_modify_rel_list.remove(r)
                             cur_modify_rel_list.append(r)
                             is_merged = True
                             break
                 if not is_merged:
-                    r = VideoRelation(vid, s_cid, pid, o_cid, straj, otraj)
+                    r = VideoRelation(vid, s_cid, pid, o_cid, straj, otraj, confs=conf_score)
                     video_relation_list.append(r)
                     cur_modify_rel_list.append(r)
         last_modify_rel_list = cur_modify_rel_list

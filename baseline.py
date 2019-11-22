@@ -2,6 +2,7 @@ import os
 import json
 import argparse
 import pickle as pkl
+import numpy as np
 from collections import defaultdict
 
 from tqdm import tqdm
@@ -10,6 +11,8 @@ from dataset import VidVRD
 from baseline import segment_video, get_model_path
 from baseline import trajectory, feature, model, association
 
+from mht_simple import *
+from bottomline import *
 
 def load_object_trajectory_proposal():
     """
@@ -81,6 +84,7 @@ def train():
 
 def detect():
     dataset = VidVRD('/home/szx/vidvrd-dataset', '/home/szx/vidvrd-dataset/videos', ['train', 'test'])
+    '''
     with open(os.path.join(get_model_path(), 'baseline_setting.json'), 'r') as fin:
         param = json.load(fin)
     short_term_relations = model.predict(dataset, param)
@@ -89,20 +93,31 @@ def detect():
     for index, st_rel in short_term_relations.items():
         vid = index[0]
         video_st_relations[vid].append((index, st_rel))
+    #print(video_st_relations['ILSVRC2015_train_00914000'][0])
+    
+    with open(os.path.join(get_model_path(), 'video_st_relations.pkl'), 'wb') as fout:
+        pkl.dump(video_st_relations, fout)
+    
+    '''
+    with open(os.path.join(get_model_path(), 'video_st_relations.pkl'), 'rb') as fin:
+        video_st_relations = pkl.load(fin)
+    
     # video-level visual relation detection by relational association
-    print('greedy relational association ...')
+    print('mht relational association ...')
     video_relations = dict()
+    
     for vid in tqdm(video_st_relations.keys()):
-        video_relations[vid] = association.greedy_relational_association(
-                dataset, video_st_relations[vid], max_traj_num_in_clip=100)
+        video_relations[vid] = mht_association(dataset, video_st_relations[vid])
+    #video_relations['ILSVRC2015_train_00914000'] = mht_association(dataset, video_st_relations['ILSVRC2015_train_00914000'])
+    
     # save detection result
-    with open(os.path.join(get_model_path(), 'baseline_relation_prediction.json'), 'w') as fout:
+    with open(os.path.join(get_model_path(), 'mht_relation_prediction.json'), 'w') as fout:
         output = {
             'version': 'VERSION 1.0',
             'results': video_relations
         }
         json.dump(output, fout)
-
+    
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VidVRD baseline')

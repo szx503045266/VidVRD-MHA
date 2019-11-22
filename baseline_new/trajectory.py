@@ -31,8 +31,7 @@ class Trajectory():
     def copy(self, traj):
         self.pstart = traj.pstart
         self.pend = traj.pend
-        self.rois = deque()
-        self.rois.extend(traj.rois)
+        self.rois = traj.rois
         self.score = traj.score
         self.category = traj.category
         self.classeme = traj.classeme

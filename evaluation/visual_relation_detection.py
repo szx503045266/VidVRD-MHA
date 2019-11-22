@@ -19,9 +19,11 @@ def eval_detection_scores(gt_relations, pred_relations, viou_threshold):
                 o_iou = viou(pred_relation['obj_traj'], pred_relation['duration'],
                         gt_relation['obj_traj'], gt_relation['duration'])
                 ov = min(s_iou, o_iou)
+                #print(pred_relation['triplet'], s_iou, o_iou)
                 if ov >= viou_threshold and ov > ov_max:
                     ov_max = ov
                     k_max = gt_idx
+                    #print(pred_relation['triplet'], pred_idx, gt_idx, ov)
         if k_max >= 0:
             hit_scores[pred_idx] = pred_relation['score']
             gt_detected[k_max] = True
