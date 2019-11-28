@@ -13,11 +13,6 @@ from baseline import *
 from baseline.association import *
 from baseline.trajectory import *
 
-viou_thres = 0.5
-s_score_thres = 0.5
-o_score_thres = 0.5
-rel_score_thres = 0.5
-
 class Node(object):
     
     def __init__(self, id, segment, parent_id, child_id, s, p, o, s_traj, o_traj, rel_score):
@@ -37,7 +32,7 @@ class Tree(object):
 
     def __init__(self, segment, id, s, p, o, s_traj, o_traj, rel_score):
         self.nodes = dict()
-        self.nodes[id] = Node(id, segment, -1, [], s, p, o, s_traj, o_traj, rel_score)
+        self.nodes[id] = Node(id, segment, -1, [], s, p, o, s_traj, o_traj, rel_score/10)
         self.node_num = 1
         self.leaflist = [id]
 
@@ -61,6 +56,7 @@ class Tree(object):
         return fail
 
     def add_node(self, segment, id, s_cid, pid, o_cid, s_traj, o_traj, conf_score, success, fail, score_thres=0.5):
+        '''
         add = False
         rel_score_list = []
         for leaf in self.leaflist:
@@ -95,7 +91,7 @@ class Tree(object):
             if s_score > score_thres and o_score > score_thres:
             
                 new_node = Node(
-                        id, segment, leaf, [], s_cid, pid, o_cid, s_traj, o_traj, conf_score)
+                        id, segment, leaf, [], s_cid, pid, o_cid, s_traj, o_traj, min(s_score, o_score))
                 #print(id, leaf)
                 self.nodes[id] = new_node
                 self.node_num += 1
@@ -106,8 +102,55 @@ class Tree(object):
             fail.append(id)
         else:
             success.append(id)
+        '''
+        rel_score_list = []
+        for leaf in self.leaflist:
+            s = self.nodes[leaf].s
+            p = self.nodes[leaf].p
+            o = self.nodes[leaf].o
+            
+            if s == s_cid and o == o_cid and p == pid:
+                leaf_s_traj = Trajectory(0, 0, deque(), 0, 0, 0)
+                leaf_s_traj.copy(self.nodes[leaf].s_traj)
+                leaf_s_traj.pstart = s_traj.pstart - 15
+                leaf_s_traj.pend = s_traj.pstart + 15
+                                    
+                leaf_o_traj = Trajectory(0, 0, deque(), 0, 0, 0)
+                leaf_o_traj.copy(self.nodes[leaf].o_traj)
+                leaf_o_traj.pstart = o_traj.pstart - 15
+                leaf_o_traj.pend = o_traj.pstart + 15
+                                    
+                s_viou = association._traj_iou(leaf_s_traj, s_traj)
+                o_viou = association._traj_iou(leaf_o_traj, o_traj)
+                s_score = 0.5 * s_viou + 0.5 * conf_score/10
+                o_score = 0.5 * o_viou + 0.5 * conf_score/10
+                
+                if s_score > score_thres and o_score > score_thres:
+                    rel_score = (s_score + o_score) / 2
+                
+                    total_score = self.sum_score(leaf)
+                    path_len = self.path_len(leaf)
+                    path_score = (total_score + rel_score) / (path_len + 1)
+                    
+                    rel_score_list.append((leaf, rel_score, path_score))
+                    
+            else:
+                fail.append(id)
+                return
+            
+        if len(rel_score_list) == 0:
+            fail.append(id)
+        else:
+            rel_score_list.sort(key = lambda score: score[2], reverse = True)
+            leaf = rel_score_list[0][0]
+            new_node = Node(
+                    id, segment, leaf, [], s_cid, pid, o_cid, s_traj, o_traj, rel_score_list[0][1])
+            self.nodes[id] = new_node
+            self.node_num += 1
+            self.nodes[leaf].child_id.append(id)
+            success.append(id)
 
-    def pruning_leaf(self, vrelation_list, dataset, leaf_thres = 1):
+    def pruning_leaf(self, vrelation_list, dataset, leaf_thres = 5):
         # Control the size of the tree after each segment
         leaf_num = len(self.leaflist)
         #print(leaf_num)
@@ -176,22 +219,30 @@ class Tree(object):
         path = self.track_path(id)
         return len(path)
 
-    def path_score(self, leaf):
+    def sum_score(self, id):
+        """Return the sum of scores in a path"""
+        path = self.track_path(id)
+        total_score = 0
+        for i in path:
+            total_score += self.nodes[i].rel_score
+        return total_score
+
+    def path_score(self, id):
         """Return a path's score"""
-        path = self.track_path(leaf)
+        path = self.track_path(id)
         l = len(path)
         total_score = 0
         for i in path:
             total_score += self.nodes[i].rel_score
         return total_score/l
 
-    def path_duration(self, leaf):
+    def path_duration(self, id):
         """Return the duration of a path"""
-        path = self.track_path(leaf)
+        path = self.track_path(id)
         l = len(path)
         start_node = path[l - 1]
         start = self.nodes[start_node].s_traj.pstart
-        end = self.nodes[leaf].s_traj.pend
+        end = self.nodes[id].s_traj.pend
         return start, end
 
     def max_score_path(self):
@@ -212,11 +263,6 @@ class Tree(object):
                 self.leaflist.remove(leaf)
         for id in success:
             self.leaflist.append(id)
-
-    def score(self, leaf, id, s_feat, o_feat, rel_feat, s_traj, o_traj):
-        '''Return the leaf node info (3 score) with max linking rel_score'''
-        #TODO
-        return 0.5, 0.5, 0.5
 
     def generate_traj(self, leaf):
         """Generate the trajectory of a path"""
@@ -264,16 +310,16 @@ class Tree(object):
                 o_roi_1 = obj_traj.rois[obj_traj.length() - 1]
                 o_roi_2 = o_traj.rois[0]
                 for i in range(1, missing_length+1):
-                    s_left = (s_roi_1.left() + s_roi_2.left()) / (missing_length + 1) * i
-                    s_top = (s_roi_1.top() + s_roi_2.top()) / (missing_length + 1) * i
-                    s_right = (s_roi_1.right() + s_roi_2.right()) / (missing_length + 1) * i
-                    s_bottom = (s_roi_1.bottom() + s_roi_2.bottom()) / (missing_length + 1) * i
+                    s_left = (s_roi_2.left() - s_roi_1.left()) / (missing_length + 1) * i + s_roi_1.left()
+                    s_top = (s_roi_2.top() - s_roi_1.top()) / (missing_length + 1) * i + s_roi_1.top()
+                    s_right = (s_roi_2.right() - s_roi_1.right()) / (missing_length + 1) * i + s_roi_1.right()
+                    s_bottom = (s_roi_2.bottom() - s_roi_1.bottom()) / (missing_length + 1) * i + s_roi_1.bottom()
                     sub_traj.predict(drectangle(s_left, s_top, s_right, s_bottom))
 
-                    o_left = (o_roi_1.left() + o_roi_2.left()) / (missing_length + 1) * i
-                    o_top = (o_roi_1.top() + o_roi_2.top()) / (missing_length + 1) * i
-                    o_right = (o_roi_1.right() + o_roi_2.right()) / (missing_length + 1) * i
-                    o_bottom = (o_roi_1.bottom() + o_roi_2.bottom()) / (missing_length + 1) * i
+                    o_left = (o_roi_2.left() - o_roi_1.left()) / (missing_length + 1) * i + o_roi_1.left()
+                    o_top = (o_roi_2.top() - o_roi_1.top()) / (missing_length + 1) * i + o_roi_1.top()
+                    o_right = (o_roi_2.right() - o_roi_1.right()) / (missing_length + 1) * i + o_roi_1.right()
+                    o_bottom = (o_roi_2.bottom() - o_roi_1.bottom()) / (missing_length + 1) * i + o_roi_1.bottom()
                     obj_traj.predict(drectangle(o_left, o_top, o_right, o_bottom))
                 for i in range(s_traj.length()):
                     sub_traj.predict(s_traj.rois[i])
@@ -304,15 +350,15 @@ class Tree(object):
 
 '''Operation for treelist'''
 
-def add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction, max_traj_num_in_clip=100):
+def add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction, max_traj_num_in_clip=150):
     vid, fstart, fend = index
     #print("add_segment():")
     #print(index)
     # load prediction data
     pred_list, iou, trackid = prediction
     sorted_pred_list = sorted(pred_list, key=lambda x: x[0], reverse=True)
-    if len(sorted_pred_list) > max_traj_num_in_clip:
-        sorted_pred_list = sorted_pred_list[0:max_traj_num_in_clip]
+    #if len(sorted_pred_list) > max_traj_num_in_clip:
+        #sorted_pred_list = sorted_pred_list[0:max_traj_num_in_clip]
     # load predict trajectory data
     trajs = object_trajectory_proposal(dataset, vid, fstart, fend)
     for traj in trajs:
@@ -363,16 +409,57 @@ def path_conflict(path1, path2):
     return False
 
 def mwis(treelist):
-    max_leaves = []
-    for tree in treelist:
-        max_leaves.append(tree.max_score_path())
+    '''
+    max_leaves = dict()
+    for tree_id, tree in enumerate(treelist):
+        max_leaves[tree_id] = tree.max_score_path()
     return max_leaves
-
+    '''
+    max_leaves = dict()
+    paths = []
+    tree_id_record = []
+    node_id_record = []
+    conflict_dict = defaultdict(list)
+    for tree_id, tree in enumerate(treelist):
+        for leaf in tree.leaflist:
+            paths.append((tree_id, tree.track_path(leaf), tree.path_score(leaf)))
+    paths.sort(key = lambda path: path[2], reverse = True)
+    for path in paths:
+        if path[0] not in tree_id_record:
+            conflict = -1
+            path[1].reverse()
+            for i, node in enumerate(path[1]):
+                if node in node_id_record:
+                    conflict = i;
+                    break;
+            if conflict == -1:
+                max_leaves[path[0]] = path[1][-1]
+                tree_id_record.append(path[0])
+                node_id_record.extend(path[1])
+            else:
+                if path[0] not in conflict_dict.keys():
+                    conflict_dict[path[0]].append(path[1][conflict - 1])
+        
+    for tree_id, tree in enumerate(treelist):
+        if tree_id not in tree_id_record:
+            tree.leaflist = []
+            tree.leaflist.extend(conflict_dict[tree_id])
+            max_path_score = 0
+            for leaf in tree.leaflist:
+                tree.nodes[leaf].child_id = []
+                path_score = tree.path_score(leaf)
+                if path_score > max_path_score:
+                    max_path_score = path_score
+                    max_leaves[tree_id] = leaf
+            tree_id_record.append(tree_id)
+            
+    return max_leaves
+    
 def pruning(treelist, max_leaves):
     for i, tree in enumerate(treelist):
         tree.N_scan_pruning(max_leaves[i])
 
-def check_trees(treelist, vrelation_list, segment, dataset, max_node_gap=15, min_path_len=1):
+def check_trees(treelist, vrelation_list, segment, max_leaves, dataset, max_node_gap=45, min_path_len=1):
     """
     Find the tree that haven't been updated for a time
     and let the path with max score in it be a track result
@@ -380,24 +467,22 @@ def check_trees(treelist, vrelation_list, segment, dataset, max_node_gap=15, min
     """
     treelist_temp = []
     treelist_temp.extend(treelist)
-    for tree in treelist_temp:
+    for tree_id, tree in enumerate(treelist_temp):
         max_seg = 0
         for leaf in tree.leaflist:
             if tree.nodes[leaf].s_traj.pend > max_seg:
                 max_seg = tree.nodes[leaf].s_traj.pend
         if max_seg <= segment - max_node_gap:
-            max_leaf = tree.max_score_path()
-            if tree.path_len(max_leaf) >= min_path_len: # Too short path will not be selected to be a vrelation
+            max_leaf = max_leaves[tree_id]
+            if tree.path_len(max_leaf) >= min_path_len: # According to gt, vrelation can have just 1 node
                 vrelation = tree.generate_vrelation(max_leaf, dataset)
                 vrelation_list.append(vrelation)
             treelist.remove(tree)
 
-def generate_results(treelist, vrelation_list, dataset):
+def generate_results(treelist, vrelation_list, max_leaves, dataset):
     """Generate the association results"""
-    for tree in treelist:
-        #print('tree')
-        max_leaf = tree.max_score_path()
-        vrelation = tree.generate_vrelation(max_leaf, dataset)
+    for tree_id, tree in enumerate(treelist):
+        vrelation = tree.generate_vrelation(max_leaves[tree_id], dataset)
         vrelation_list.append(vrelation)
 
 """Total Association Operation for a video"""
@@ -407,16 +492,18 @@ def mht_association(dataset, short_term_relations):
     vrelation_list = []
 
     short_term_relations.sort(key=lambda x: int(x[0][1]))
+    max_leaves = dict()
     for i, (index, prediction) in enumerate(short_term_relations):
         segment = index[1]
         #print("segment="+str(segment))
-        check_trees(treelist, vrelation_list, segment, dataset)
+        check_trees(treelist, vrelation_list, segment, max_leaves, dataset)
         total_node_num = add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction)
         max_leaves = mwis(treelist)
+        #print(max_leaves)
         pruning(treelist, max_leaves)
         #check_trees(treelist, vrelation_list, segment, dataset)
         
     #print("/nGenerate_total_results/n")
-    generate_results(treelist, vrelation_list, dataset)
+    generate_results(treelist, vrelation_list, max_leaves, dataset)
 
     return vrelation_list

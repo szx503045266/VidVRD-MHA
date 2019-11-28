@@ -7,10 +7,11 @@ from collections import defaultdict
 from tqdm import tqdm
 
 from dataset import VidVRD
-from baseline import segment_video, get_model_path, get_segment_signature
-from baseline import trajectory, feature, model, association
+from baseline_new import segment_video, get_model_path, get_segment_signature
+from baseline_new import trajectory, feature, model, association
 from evaluation import eval_video_object, eval_visual_relation
 
+from mht_simple_new import *
 
 def load_relation_feature():
     """
@@ -178,13 +179,14 @@ def detect():
     dataset = VidVRD('/home/szx/vidvrd-dataset', '/home/szx/vidvrd-dataset/videos', ['train', 'test'])
     with open(os.path.join(get_model_path(), 'baseline_setting.json'), 'r') as fin:
         param = json.load(fin)
+    '''
     short_term_relations = model.predict(dataset, param)
     with open(os.path.join(get_model_path(), 'short_term_relations.pkl'), 'wb') as fout:
         pickle.dump(short_term_relations, fout)
     '''
     with open(os.path.join(get_model_path(), 'short_term_relations.pkl'), 'rb') as fin:
         short_term_relations = pickle.load(fin)
-    '''
+    
     # video-level visual relation detection by relational association
     print('greedy relational association ...')
     video_relations = dict()
@@ -193,7 +195,7 @@ def detect():
         res = sorted(res, key=lambda r: r['score'], reverse=True)[:param['video_topk']]
         video_relations[vid] = res
     # save detection result
-    with open(os.path.join(get_model_path(), 'baseline_relation_prediction.json'), 'w') as fout:
+    with open(os.path.join(get_model_path(), 'baseline_relation_prediction_new.json'), 'w') as fout:
         output = {
             'version': 'VERSION 1.0',
             'results': video_relations

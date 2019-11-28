@@ -148,12 +148,6 @@ def greedy_association(dataset, short_term_relations, max_traj_num_in_clip=100):
                 r = VideoRelation(vid, s_cid, pid, o_cid, straj, otraj, confs=conf_score)
                 video_relation_list.append(r)
                 cur_modify_rel_list.append(r)
-                if pred[1] == (21,72,9):
-                    print(dataset.get_object_name(21),
-                          dataset.get_predicate_name(72),
-                          dataset.get_object_name(9))
-                    print("first:",r.straj.rois[15], r.confs_list)
-                    print()
         else:
             for pred_idx, pred in enumerate(sorted_pred_list):
                 conf_score = pred[0]
@@ -161,29 +155,14 @@ def greedy_association(dataset, short_term_relations, max_traj_num_in_clip=100):
                 s_tididx, o_tididx = pred[2]
                 straj = trajs[s_tididx]
                 otraj = trajs[o_tididx]
-                if pred[1] == (21,72,9):
-                    print("before1:", pred[1],straj.rois[0], conf_score)
                 last_modify_rel_list.sort(key=lambda r: r.mean_confs(), reverse=True)
                 is_merged = False
                 for r in last_modify_rel_list:
-                    if r.triplet() == (21,72,9):
-                        print("before2:", pred[1],r.straj.rois[15], r.confs_list)
-                        print()
                     if pred[1] == r.triplet():
                         #print("in", pred[1], r.confs_list, conf_score)
                         if (straj.pstart < r.fend and otraj.pstart < r.fend) \
                                 and r.both_overlap(straj,otraj):
-                            #print(pred[1],conf_score)
-                            if pred[1] == (21,72,9):
-                                print(dataset.get_object_name(21),
-                                      dataset.get_predicate_name(72),
-                                      dataset.get_object_name(9))
-                                print("before:",r.straj.rois[15], straj.rois[0])
-                                print('\t', r.confs_list)
                             r.extend(straj, otraj, conf_score)
-                            if pred[1] == (21,72,9):
-                                print("after:",r.straj.rois[15])
-                                print('\t', r.confs_list)
                             last_modify_rel_list.remove(r)
                             cur_modify_rel_list.append(r)
                             is_merged = True

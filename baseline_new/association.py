@@ -2,7 +2,7 @@ from collections import defaultdict
 
 import numpy as np
 
-from baseline import *
+from baseline_new import *
 from .trajectory import Trajectory
 from .relation import VideoRelation
 
