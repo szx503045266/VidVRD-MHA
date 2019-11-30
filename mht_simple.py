@@ -30,9 +30,9 @@ class Node(object):
 
 class Tree(object):
 
-    def __init__(self, segment, id, s, p, o, s_traj, o_traj, rel_score):
+    def __init__(self, segment, id, s, p, o, s_traj, o_traj, conf_score):
         self.nodes = dict()
-        self.nodes[id] = Node(id, segment, -1, [], s, p, o, s_traj, o_traj, rel_score/10)
+        self.nodes[id] = Node(id, segment, -1, [], s, p, o, s_traj, o_traj, (conf_score, conf_score/10))
         self.node_num = 1
         self.leaflist = [id]
 
@@ -127,12 +127,13 @@ class Tree(object):
                 
                 if s_score > score_thres and o_score > score_thres:
                     rel_score = (s_score + o_score) / 2
-                
-                    total_score = self.sum_score(leaf)
-                    path_len = self.path_len(leaf)
-                    path_score = (total_score + rel_score) / (path_len + 1)
                     
-                    rel_score_list.append((leaf, rel_score, path_score))
+                    #total_score = self.sum_score(leaf)
+                    #path_len = self.path_len(leaf)
+                    #path_score = (total_score + rel_score) / (path_len + 1)
+                    leaf_path_max_score, leaf_path_avg_score = self.path_score(leaf)
+                    
+                    rel_score_list.append((leaf, conf_score, rel_score, leaf_path_max_score, leaf_path_avg_score))
                     
             else:
                 fail.append(id)
@@ -141,10 +142,10 @@ class Tree(object):
         if len(rel_score_list) == 0:
             fail.append(id)
         else:
-            rel_score_list.sort(key = lambda score: score[2], reverse = True)
+            rel_score_list.sort(key = lambda score:(score[4]), reverse = True)
             leaf = rel_score_list[0][0]
             new_node = Node(
-                    id, segment, leaf, [], s_cid, pid, o_cid, s_traj, o_traj, rel_score_list[0][1])
+                    id, segment, leaf, [], s_cid, pid, o_cid, s_traj, o_traj, (rel_score_list[0][1], rel_score_list[0][2]))
             self.nodes[id] = new_node
             self.node_num += 1
             self.nodes[leaf].child_id.append(id)
@@ -159,10 +160,11 @@ class Tree(object):
         paths = []
         for leaf in self.leaflist:
             #print(leaf)
-            path = (leaf, self.track_path(leaf), self.path_score(leaf))
+            path_max_score, path_avg_score = self.path_score(leaf)
+            path = (leaf, path_max_score, path_avg_score)
             #print(path)
             paths.append(path)
-        paths.sort(key=lambda p:p[2], reverse=True)
+        paths.sort(key=lambda p:(p[1],p[2]), reverse=True)
         
         for leaf, _, _ in paths[leaf_thres: ]:
             self.leaflist.remove(leaf)
@@ -224,17 +226,40 @@ class Tree(object):
         path = self.track_path(id)
         total_score = 0
         for i in path:
-            total_score += self.nodes[i].rel_score
+            total_score += self.nodes[i].rel_score[1]
         return total_score
-
-    def path_score(self, id):
-        """Return a path's score"""
+    '''
+    def path_avg_score(self, id):
+        """Return a path's score(the average node score in the path)"""
         path = self.track_path(id)
         l = len(path)
         total_score = 0
         for i in path:
             total_score += self.nodes[i].rel_score
         return total_score/l
+
+    def path_max_score(self, id):
+        """Return a path 's score(the max node score in the path)"""
+        path = self.track_path(id)
+        max_score = 0
+        for i in path:
+            if self.nodes[i].rel_score > max_score:
+                max_score = self.nodes[i].rel_score
+        return max_score
+    '''
+    def path_score(self, id):
+        """Return a path's score(the max node score in the path, the average node score in the path)"""
+        path = self.track_path(id)
+        l = len(path)
+        total_score = 0
+        max_score = 0
+        for i in path:
+            (conf_score, rel_score) = self.nodes[i].rel_score
+            total_score += rel_score
+            if conf_score > max_score:
+                max_score = conf_score
+        avg_score = total_score/l
+        return max_score, avg_score
 
     def path_duration(self, id):
         """Return the duration of a path"""
@@ -249,14 +274,15 @@ class Tree(object):
         """Return the leaf id of the path with max score"""
         paths = []
         for leaf in self.leaflist:
-            path = (leaf, self.path_score(leaf))
+            path_max_score, path_avg_score = self.path_score(leaf)
+            path = (leaf, path_max_score, path_avg_score)
             paths.append(path)
-        paths.sort(key=lambda p:p[1], reverse=True)
+        paths.sort(key=lambda p:(p[1],p[2]), reverse=True)
         return paths[0][0]
 
     def update_leaf(self, segment, success):
         """Update the leaflist after adding a segment of nodes"""
-        leaflist_temp = []  #fix a bug
+        leaflist_temp = []
         leaflist_temp.extend(self.leaflist)
         for leaf in leaflist_temp:
             if len(self.nodes[leaf].child_id) != 0:
@@ -268,17 +294,9 @@ class Tree(object):
         """Generate the trajectory of a path"""
         path = self.track_path(leaf)
         path.reverse()
-        #if(leaf == 180 or leaf == 182 or leaf == 188):
-            #print()
-            #print(path)
-        #print(path)
         
         sub_traj = Trajectory(0, 0, deque(), 0, 0, 0)
-        #if(leaf == 180 or leaf == 182 or leaf == 188):
-            #print("b1_start", path[0], len(self.nodes[path[0]].s_traj.rois))
         sub_traj.copy(self.nodes[path[0]].s_traj)
-        #if(leaf == 180 or leaf == 182 or leaf == 188):
-            #print("b2_start", len(sub_traj.rois), "(%d,%d)"%(sub_traj.pstart, sub_traj.pend))
         
         obj_traj = Trajectory(0, 0, deque(), 0, 0, 0)
         obj_traj.copy(self.nodes[path[0]].o_traj)
@@ -289,19 +307,11 @@ class Tree(object):
             o_traj = Trajectory(0, 0, deque(), 0, 0, 0)
             s_traj.copy(self.nodes[id].s_traj)
             o_traj.copy(self.nodes[id].o_traj)
-            #if(leaf == 180 or leaf == 182 or leaf == 188):
-                #print(id, len(sub_traj.rois), len(s_traj.rois))
-                #print("(%d,%d)(%d,%d)"%(sub_traj.pstart, sub_traj.pend, s_traj.pstart, s_traj.pend))
             overlap_length = sub_traj.pend - s_traj.pstart
             
             if overlap_length >= 0:
-                #print("overlap_length=%d"%overlap_length)
-                #if(leaf == 180 or leaf == 182 or leaf == 188):
-                    #print(len(sub_traj.rois), "(%d,%d)"%(sub_traj.pstart,sub_traj.pend), sub_traj.rois[15], s_traj.rois[0])
                 sub_traj = association._merge_trajs(sub_traj, s_traj)
                 obj_traj = association._merge_trajs(obj_traj, o_traj)
-                #if(leaf == 180 or leaf == 182 or leaf == 188):
-                    #print(len(sub_traj.rois), "(%d,%d)"%(sub_traj.pstart,sub_traj.pend), sub_traj.rois[15])
             else:
                 missing_length = -overlap_length
                 
@@ -335,7 +345,7 @@ class Tree(object):
             dataset.get_predicate_name(self.nodes[leaf].p),
             dataset.get_object_name(self.nodes[leaf].o)
         ]
-        vrelation['score'] = float(self.path_score(leaf))
+        vrelation['score'] = float(self.path_score(leaf)[0])
         start, end = self.path_duration(leaf)
         vrelation['duration'] = [
             int(start),
@@ -408,7 +418,7 @@ def path_conflict(path1, path2):
             return True
     return False
 
-def mwis(treelist):
+def select(treelist):
     '''
     max_leaves = dict()
     for tree_id, tree in enumerate(treelist):
@@ -422,8 +432,9 @@ def mwis(treelist):
     conflict_dict = defaultdict(list)
     for tree_id, tree in enumerate(treelist):
         for leaf in tree.leaflist:
-            paths.append((tree_id, tree.track_path(leaf), tree.path_score(leaf)))
-    paths.sort(key = lambda path: path[2], reverse = True)
+            path_max_score, path_avg_score = tree.path_score(leaf)
+            paths.append((tree_id, tree.track_path(leaf), path_max_score, path_avg_score))
+    paths.sort(key = lambda path:(path[2],path[3]), reverse = True)
     for path in paths:
         if path[0] not in tree_id_record:
             conflict = -1
@@ -444,13 +455,18 @@ def mwis(treelist):
         if tree_id not in tree_id_record:
             tree.leaflist = []
             tree.leaflist.extend(conflict_dict[tree_id])
-            max_path_score = 0
+            
+            #max_path_score = 0
+            paths = []
             for leaf in tree.leaflist:
                 tree.nodes[leaf].child_id = []
-                path_score = tree.path_score(leaf)
-                if path_score > max_path_score:
-                    max_path_score = path_score
-                    max_leaves[tree_id] = leaf
+                path_max_score, path_avg_score = tree.path_score(leaf)
+                paths.append((leaf, path_max_score, path_avg_score))
+                #if path_score > max_path_score:
+                    #max_path_score = path_score
+                    #max_leaves[tree_id] = leaf
+            paths.sort(key = lambda path:(path[1],path[2]), reverse = True)
+            max_leaves[tree_id] = paths[0][0]
             tree_id_record.append(tree_id)
             
     return max_leaves
@@ -498,7 +514,7 @@ def mht_association(dataset, short_term_relations):
         #print("segment="+str(segment))
         check_trees(treelist, vrelation_list, segment, max_leaves, dataset)
         total_node_num = add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction)
-        max_leaves = mwis(treelist)
+        max_leaves = select(treelist)
         #print(max_leaves)
         pruning(treelist, max_leaves)
         #check_trees(treelist, vrelation_list, segment, dataset)

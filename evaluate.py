@@ -19,7 +19,7 @@ def evaluate_action(dataset, split, prediction):
     mean_ap, ap_class = eval_action(groundtruth, prediction)
 
 
-def evaluate_relation(dataset, split, prediction, use_old_zeroshot_eval=False):
+def evaluate_relation(dataset, split, prediction, use_old_zeroshot_eval=True):
     groundtruth = dict()
     for vid in dataset.get_index(split):
         groundtruth[vid] = dataset.get_relation_insts(vid)
