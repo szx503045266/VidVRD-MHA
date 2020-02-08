@@ -1,6 +1,7 @@
 import os
 import json
 import argparse
+#import gensim
 import pickle as pkl
 import numpy as np
 from collections import defaultdict
@@ -101,6 +102,11 @@ def detect():
     '''
     with open(os.path.join(get_model_path(), 'video_st_relations.pkl'), 'rb') as fin:
         video_st_relations = pkl.load(fin)
+    
+    #Word2vec
+    #print('loading word vectors...')
+    #word_vectors = gensim.models.KeyedVectors.load_word2vec_format('word2vec/GoogleNews-vectors-negative300.bin.gz', binary=True)
+    #print('Word vectors loaded.')
     
     # video-level visual relation detection by relational association
     print('mht relational association ...')

@@ -3,11 +3,13 @@ import pickle
 import argparse
 import itertools
 import time
-from collections import deque, defaultdict
+from collections import deque, defaultdict, Counter
 from copy import deepcopy
 
 from dlib import drectangle
 import numpy as np
+
+#import gensim
 
 from baseline import *
 from baseline.association import *
@@ -47,7 +49,7 @@ class Tree(object):
             s_tididx, o_tididx = pred[2]
             s_traj = trajs[s_tididx]
             o_traj = trajs[o_tididx]
-            self.add_node(segment, start_id + pred_idx, s_cid, pid, o_cid, s_traj, o_traj, conf_score, success, fail)
+            self.add_node(segment, start_id + pred_idx, s_cid, pid, o_cid, s_traj, o_traj, conf_score, success, fail, dataset)
         #print('out1')
         self.update_leaf(segment, success)
         #print('out2')
@@ -55,7 +57,7 @@ class Tree(object):
         #print('out3')
         return fail
 
-    def add_node(self, segment, id, s_cid, pid, o_cid, s_traj, o_traj, conf_score, success, fail, score_thres=0.5):
+    def add_node(self, segment, id, s_cid, pid, o_cid, s_traj, o_traj, conf_score, success, fail, dataset, score_thres=0.5):
         '''
         add = False
         rel_score_list = []
@@ -109,7 +111,13 @@ class Tree(object):
             p = self.nodes[leaf].p
             o = self.nodes[leaf].o
             
+            #leaf_s_str = dataset.get_object_name(s).split("_")[-1]
+            #leaf_o_str = dataset.get_object_name(o).split("_")[-1]
+            #new_s_str = dataset.get_object_name(s_cid).split("_")[-1]
+            #new_o_str = dataset.get_object_name(o_cid).split("_")[-1]
+            
             if s == s_cid and o == o_cid and p == pid:
+            #if p == pid and word_vectors.similarity(leaf_s_str, new_s_str) > wv_sim_thres and word_vectors.similarity(leaf_o_str, new_o_str) > wv_sim_thres:
                 leaf_s_traj = Trajectory(0, 0, deque(), 0, 0, 0)
                 leaf_s_traj.copy(self.nodes[leaf].s_traj)
                 leaf_s_traj.pstart = s_traj.pstart - 15
@@ -215,6 +223,17 @@ class Tree(object):
             path.append(i)
             i = self.nodes[i].parent_id
         return path
+
+    def path_most_subobj(self, id):
+        path = self.track_path(id)
+        sub = []
+        obj = []
+        for i in path:
+            sub.append(self.nodes[i].s)
+            obj.append(self.nodes[i].o)
+        path_sub = Counter(sub).most_common(1)[0][0]
+        path_obj = Counter(obj).most_common(1)[0][0]
+        return path_sub, path_obj
 
     def path_len(self, id):
         """Return a path's length"""
@@ -340,17 +359,22 @@ class Tree(object):
 
     def generate_vrelation(self, leaf, dataset):
         vrelation = dict()
+        
+        #path_sub, path_obj = self.path_most_subobj(leaf)
         vrelation['triplet'] = [
             dataset.get_object_name(self.nodes[leaf].s),
             dataset.get_predicate_name(self.nodes[leaf].p),
             dataset.get_object_name(self.nodes[leaf].o)
         ]
+        
         vrelation['score'] = float(self.path_score(leaf)[0])
+        
         start, end = self.path_duration(leaf)
         vrelation['duration'] = [
             int(start),
             int(end)
         ]
+        
         sub_traj, obj_traj = self.generate_traj(leaf)
         vrelation['sub_traj'] = sub_traj.serialize()['rois']
         vrelation['obj_traj'] = obj_traj.serialize()['rois']
@@ -360,17 +384,68 @@ class Tree(object):
 
 '''Operation for treelist'''
 
-def add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction, max_traj_num_in_clip=150):
+def add_segment(vrelation_list, treelist, total_node_num, dataset, index, prediction, max_traj_num_in_clip=200):
     vid, fstart, fend = index
     #print("add_segment():")
     #print(index)
     # load prediction data
     pred_list, iou, trackid = prediction
     sorted_pred_list = sorted(pred_list, key=lambda x: x[0], reverse=True)
-    #if len(sorted_pred_list) > max_traj_num_in_clip:
-        #sorted_pred_list = sorted_pred_list[0:max_traj_num_in_clip]
+    if len(sorted_pred_list) > max_traj_num_in_clip:
+        sorted_pred_list = sorted_pred_list[0:max_traj_num_in_clip]
     # load predict trajectory data
+    
     trajs = object_trajectory_proposal(dataset, vid, fstart, fend)
+    
+    ########using gt s/o label for test#########
+    '''
+    trajs_gt = object_trajectory_proposal(dataset, vid, fstart, fend, gt = True)
+    
+    for idx,tid in enumerate(trackid):
+        if tid >= 0:
+            gt_start = idx
+            break
+    gt_trackid = []
+    gt_trackid.extend(trackid)
+    for idx,tid in enumerate(gt_trackid):
+        if tid >= 0:
+            gt_start = idx
+            break
+    for idx,tid in enumerate(gt_trackid[:gt_start]):
+        gt_idx = np.argmax(iou[idx][gt_start:])
+        gt_trackid[idx] = gt_idx
+    
+    tp_sorted_pred_list = []
+    tp_sorted_pred_list.extend(sorted_pred_list)
+    for idx in range(len(tp_sorted_pred_list)):
+        gt_sub = trajs_gt[gt_trackid[tp_sorted_pred_list[idx][2][0]]].category
+        gt_obj = trajs_gt[gt_trackid[tp_sorted_pred_list[idx][2][1]]].category
+        if gt_sub != tp_sorted_pred_list[idx][1][0] or gt_obj != tp_sorted_pred_list[idx][1][2]:
+            sorted_pred_list.remove(tp_sorted_pred_list[idx])
+        #triplet = (gt_sub, sorted_pred_list[idx][1][1], gt_obj)
+        #sorted_pred_list[idx] = (sorted_pred_list[idx][0], triplet, sorted_pred_list[idx][2])
+    '''
+    ###########################################
+    
+    ########using gt tracklet for test#########
+    '''
+    trajs = object_trajectory_proposal(dataset, vid, fstart, fend, gt = True)
+    
+    for idx,tid in enumerate(trackid):
+        if tid >= 0:
+            gt_start = idx
+            break
+    for idx,tid in enumerate(trackid[:gt_start]):
+        gt_idx = np.argmax(iou[idx][gt_start:])
+        #trackid[idx] = trackid[gt_idx + gt_start]
+        trackid[idx] = gt_idx
+        assert(trajs[gt_idx].gt_trackid == trackid[gt_idx + gt_start])
+        
+    for idx in range(len(sorted_pred_list)):
+        sorted_pred_list[idx] = (sorted_pred_list[idx][0], sorted_pred_list[idx][1], (trackid[sorted_pred_list[idx][2][0]], trackid[sorted_pred_list[idx][2][1]]))
+    '''
+    ###########################################
+    
     for traj in trajs:
         traj.pstart = fstart
         traj.pend = fend
@@ -441,8 +516,8 @@ def select(treelist):
             path[1].reverse()
             for i, node in enumerate(path[1]):
                 if node in node_id_record:
-                    conflict = i;
-                    break;
+                    conflict = i
+                    break
             if conflict == -1:
                 max_leaves[path[0]] = path[1][-1]
                 tree_id_record.append(path[0])
