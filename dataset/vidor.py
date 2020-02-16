@@ -39,7 +39,13 @@ class VidOR(DatasetV1):
         return actions
 
     def get_video_path(self, vid):
-        return os.path.join(self.video_rpath, self.annos[vid]['video_path'])
+        train_path = '{}/training-video/{}'.format(self.video_rpath, self.annos[vid]['video_path'])
+        val_path = '{}/validation-video/{}'.format(self.video_rpath, self.annos[vid]['video_path'])
+        if os.path.exists(val_path):
+            return val_path
+        else:
+            return train_path
+        #return os.path.join(self.video_rpath, self.annos[vid]['video_path'])
 
 
 if __name__ == '__main__':
