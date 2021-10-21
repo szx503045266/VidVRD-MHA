@@ -2,7 +2,6 @@ import os
 import sys
 #sys.path.append("/home/szx/Files/VVRD/VidVRD-helper")
 
-import gc
 import pickle
 import argparse
 import itertools
@@ -21,11 +20,13 @@ from baseline.association import *
 from baseline.association import _traj_iou, _merge_trajs
 from baseline.trajectory import *
 
+#from util.trajectory import *
+#from association.videorelation import _merge_trajs, _traj_iou
+
 class Node(object):
     
-    def __init__(self, obs_id, id, segment, parent_id, child_id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, rel_score):
+    def __init__(self, id, segment, parent_id, child_id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, rel_score):
         # child_id is a list
-        self.obs_id = obs_id
         self.id = id
         self.segment = segment
         self.parent_id = parent_id
@@ -42,37 +43,34 @@ class Node(object):
 
 class Tree(object):
 
-    def __init__(self, segment, obs_id, id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, conf_score):
+    def __init__(self, segment, id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, conf_score):
         self.nodes = dict()
-        self.nodes[1] = Node(obs_id, 1, segment, -1, [], s, p, o, s_score, p_score, o_score, s_traj, o_traj, (conf_score, conf_score))
+        self.nodes[id] = Node(id, segment, -1, [], s, p, o, s_score, p_score, o_score, s_traj, o_traj, (conf_score, conf_score/10))
         self.node_num = 1
-        self.leaflist = [1]
+        self.leaflist = [id]
 
-    def add_segment(self, vrelation_list, gt, segment, start_obs_id, num, sorted_pred_list, trajs, word_vectors, obs_conn):
+    def add_segment(self, vrelation_list, gt, segment, start_id, num, sorted_pred_list, trajs, word_vectors):
         '''The input are rel_feat, s_traj, o_traj of all tracklets in this segment.
         Return the index of the node not linked'''
-        success_node = []
+        success = []
+        fail = []
         for pred_idx, pred in enumerate(sorted_pred_list):
-            #print('front '+str(start_id))
             conf_score = pred[0]
             s_cid, pid, o_cid = pred[1]
             s_tididx, o_tididx = pred[2]
             s_score, p_score, o_score = pred[3]
             s_traj = trajs[s_tididx]
             o_traj = trajs[o_tididx]
-            self.add_node(segment, start_obs_id + pred_idx, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score, success_node, gt, word_vectors, obs_conn)
+            self.add_node(segment, start_id + pred_idx, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score, success, fail, gt, word_vectors)
         #print('out1')
-        #print('a:'+str(len(self.leaflist)))
-        self.update_leaf(segment, success_node)
-        #print('b:'+str(len(self.leaflist)))
+        self.update_leaf(segment, success)
         #print('out2')
         self.pruning_leaf(vrelation_list, gt)
-        #print('c:'+str(len(self.leaflist)))
         #print('out3')
+        return fail
 
-    def add_node(self, segment, obs_id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score, success_node, gt, word_vectors, obs_conn, score_thres=0.5):
+    def add_node(self, segment, id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score, success, fail, gt, word_vectors, score_thres=0.5):
         rel_score_list = []
-        #if start_id == 307: print('start_id=307')
         for leaf in self.leaflist:
             s = self.nodes[leaf].s
             p = self.nodes[leaf].p
@@ -104,8 +102,8 @@ class Tree(object):
                 leaf_o_traj.pstart = o_traj.pstart - 15
                 leaf_o_traj.pend = o_traj.pstart + 15
                                     
-                s_viou = _traj_iou(leaf_s_traj, s_traj)
-                o_viou = _traj_iou(leaf_o_traj, o_traj)
+                s_viou = association._traj_iou(leaf_s_traj, s_traj)
+                o_viou = association._traj_iou(leaf_o_traj, o_traj)
                 s_con_score = 0.6 * s_viou + 0.4 * s_score   ##### parameters
                 o_con_score = 0.6 * o_viou + 0.4 * o_score
                 #s_con_score = s_viou
@@ -115,17 +113,28 @@ class Tree(object):
                     #rel_score = (s_con_score + o_con_score)/2 + 0.3 * p_score
                     rel_score = (s_con_score + o_con_score + 0.6 * p_score) / 2.6   #############################
                     
-                    self.node_num += 1
-                    id = self.node_num
-                    #id = start_node_id + link_node_num
-                    new_node = Node(
-                          obs_id, id, segment, leaf, [], s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, (conf_score, rel_score))
-                    #if id == 307: print(leaf, link_num)
-                    self.nodes[id] = new_node
-                    self.nodes[leaf].child_id.append(id)
-                    success_node.append(id)
-                    obs_conn[obs_id] = True
-        
+                    #total_score = self.sum_score(leaf)
+                    path_len = self.path_len(leaf)
+                    leaf_path_conf_score, leaf_path_rel_score, _ = self.path_score(leaf)
+                    link_path_score = (leaf_path_rel_score*path_len+rel_score)/(path_len+1) # + max(leaf_path_conf_score,conf_score)
+                    rel_score_list.append((leaf, conf_score, rel_score, link_path_score))
+                    
+            else:
+                fail.append(id)
+                return
+            
+        if len(rel_score_list) == 0:
+            fail.append(id)
+        else:
+            rel_score_list.sort(key = lambda score:(score[3]), reverse = True)
+            leaf = rel_score_list[0][0]
+            new_node = Node(
+                    id, segment, leaf, [], s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, (rel_score_list[0][1], rel_score_list[0][2]))
+            self.nodes[id] = new_node
+            self.node_num += 1
+            self.nodes[leaf].child_id.append(id)
+            success.append(id)
+
     def pruning_leaf(self, vrelation_list, gt, leaf_thres = 5):
         # Control the size of the tree after each segment
         leaf_num = len(self.leaflist)
@@ -133,7 +142,6 @@ class Tree(object):
         if leaf_num <= leaf_thres:
             return
         paths = []
-        #print(self.leaflist)
         for leaf in self.leaflist:
             #print(leaf)
             _, _, path_score = self.path_score(leaf)
@@ -188,19 +196,7 @@ class Tree(object):
         i = id
         #print(i, self.nodes[i].parent_id)
         while i != None and i != -1:
-            #print(i)
             path.append(i)
-            i = self.nodes[i].parent_id
-        return path
-
-    def track_obs_path(self, id):
-        """Track a path from a leaf node"""
-        path = []
-        i = id
-        #print(i, self.nodes[i].parent_id)
-        while i != None and i != -1:
-            #print(i)
-            path.append(self.nodes[i].obs_id)
             i = self.nodes[i].parent_id
         return path
 
@@ -235,6 +231,7 @@ class Tree(object):
         for i in path:
             total_score += self.nodes[i].rel_score[1]
         return total_score
+    
     def path_score(self, id):
         """Return a path's score(the max node score in the path, the average node score in the path)"""
         path = self.track_path(id)
@@ -310,8 +307,8 @@ class Tree(object):
             overlap_length = sub_traj.pend - s_traj.pstart
             
             if overlap_length >= 0:
-                sub_traj = _merge_trajs(sub_traj, s_traj)
-                obj_traj = _merge_trajs(obj_traj, o_traj)
+                sub_traj = association._merge_trajs(sub_traj, s_traj)
+                obj_traj = association._merge_trajs(obj_traj, o_traj)
             else:
                 missing_length = -overlap_length
                 
@@ -369,10 +366,10 @@ class Tree(object):
 
 '''Operation for treelist'''
 
-def add_segment(vrelation_list, treelist, total_obs_num, gt, index, prediction, word_vectors, max_traj_num_in_clip=200):
+def add_segment(vrelation_list, treelist, total_node_num, gt, index, prediction, word_vectors, max_traj_num_in_clip=200):
     vid, fstart, fend = index
     #print("add_segment():")
-    #print(index, total_node_num)
+    #print(index)
     # load prediction data
     pred_list, iou, trackid = prediction
     #pred_list = prediction
@@ -442,22 +439,22 @@ def add_segment(vrelation_list, treelist, total_obs_num, gt, index, prediction, 
 
     segment = fstart
     num = len(sorted_pred_list)
-    start_obs_id = total_obs_num
+    start_id = total_node_num
+    total_node_num += num
     #print("start_id=%d, num=%d"%(start_id, num))
     
-    obs_conn = dict()
-    for obs_id in range(start_obs_id, start_obs_id + num):
-        obs_conn[obs_id] = False
-    
+    faillist = []
     for tree in treelist:
         #print("in1")
-        tree.add_segment(vrelation_list, gt, segment, start_obs_id, num, sorted_pred_list, trajs, word_vectors, obs_conn)
+        fail = tree.add_segment(vrelation_list, gt, segment, start_id, num, sorted_pred_list, trajs, word_vectors)
         #print("in2")
+        faillist.extend(fail)
     #print('out')
     # Build new tree for all-fail nodes
-    for obs_id in range(start_obs_id, start_obs_id + num):
-        if obs_conn[obs_id] == False:
-            i = obs_id - start_obs_id
+    tree_num = len(treelist)
+    for id in range(start_id, start_id + num):
+        if faillist.count(id) == tree_num:
+            i = id - start_id
             pred = sorted_pred_list[i]
             conf_score = pred[0]
             s_cid, pid, o_cid = pred[1]
@@ -465,11 +462,11 @@ def add_segment(vrelation_list, treelist, total_obs_num, gt, index, prediction, 
             s_score, p_score, o_score = pred[3]
             s_traj = trajs[s_tididx]
             o_traj = trajs[o_tididx]
-            build_tree(treelist, segment, obs_id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score)
-    return start_obs_id + num
+            build_tree(treelist, segment, id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score)
+    return total_node_num
 
-def build_tree(treelist, segment, obs_id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score):
-    new_tree = Tree(segment, obs_id, 1, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score)
+def build_tree(treelist, segment, id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score):
+    new_tree = Tree(segment, id, s_cid, pid, o_cid, s_score, p_score, o_score, s_traj, o_traj, conf_score)
     treelist.append(new_tree)
 
 def path_conflict(path1, path2):
@@ -491,28 +488,27 @@ def select(treelist):
     max_leaves = dict()
     paths = []
     tree_id_record = []
-    obs_id_record = []
+    node_id_record = []
     conflict_dict = defaultdict(list)
     for tree_id, tree in enumerate(treelist):
         for leaf in tree.leaflist:
             _, _, path_score = tree.path_score(leaf)
-            paths.append((tree_id, tree.track_path(leaf), tree.track_obs_path(leaf), path_score))
-    paths.sort(key = lambda path:(path[3]), reverse = True)        ##########################
+            paths.append((tree_id, tree.track_path(leaf), path_score))
+    paths.sort(key = lambda path:(path[2]), reverse = True)        ##########################
     for path in paths:
         if path[0] not in tree_id_record:
             conflict = -1
             path[1].reverse()
-            path[2].reverse()
-            for i, obs in enumerate(path[2]):
-                if obs in obs_id_record:
+            for i, node in enumerate(path[1]):
+                if node in node_id_record:
                     conflict = i
                     break
             if conflict == -1:
                 max_leaves[path[0]] = path[1][-1]
                 tree_id_record.append(path[0])
-                obs_id_record.extend(path[2])
+                node_id_record.extend(path[1])
             else:
-                if path[0] not in conflict_dict.keys():                        ############################
+                if path[0] not in conflict_dict.keys():
                     conflict_dict[path[0]].append(path[1][conflict - 1])
         
     for tree_id, tree in enumerate(treelist):
@@ -524,23 +520,20 @@ def select(treelist):
             paths = []
             for leaf in tree.leaflist:
                 tree.nodes[leaf].child_id = []
-                #_, _, path_score = tree.path_score(leaf)
-                #paths.append((leaf, path_score))
+                _, _, path_score = tree.path_score(leaf)
+                paths.append((leaf, path_score))
                 #if path_score > max_path_score:
                     #max_path_score = path_score
                     #max_leaves[tree_id] = leaf
-            #paths.sort(key = lambda path:(path[1]), reverse = True)    ################################
-            #max_leaves[tree_id] = paths[0][0]
-            max_leaves[tree_id] = tree.leaflist[0]
+            paths.sort(key = lambda path:(path[1]), reverse = True)    ################################
+            max_leaves[tree_id] = paths[0][0]
             tree_id_record.append(tree_id)
             
     return max_leaves
     
 def pruning(treelist, max_leaves):
     for i, tree in enumerate(treelist):
-        #print(len(tree.leaflist))
         tree.N_scan_pruning(max_leaves[i])
-        #print(len(tree.leaflist))
 
 def check_trees(treelist, vrelation_list, segment, max_leaves, gt, max_node_gap=45, min_path_len=1):
     """
@@ -568,20 +561,11 @@ def generate_results(treelist, vrelation_list, max_leaves, gt):
         #print(tree.path_len(max_leaves[tree_id]))
         vrelation = tree.generate_vrelation(max_leaves[tree_id], gt)
         vrelation_list.append(vrelation)
-'''
-def del_data(tree_list, max_leaves):
-    #for tree in treelist:
-        #del tree
-    del treelist
-    del max_leaves
-    gc.collect()
-'''
 
 """Total Association Operation for a video"""
 def mht_association(gt, short_term_relations, word_vectors):
-    #print('start')
     treelist = []
-    total_obs_num = 0
+    total_node_num = 0
     vrelation_list = []
 
     short_term_relations.sort(key=lambda x: int(x[0][1]))
@@ -590,7 +574,7 @@ def mht_association(gt, short_term_relations, word_vectors):
         segment = index[1]
         #print("segment="+str(segment))
         check_trees(treelist, vrelation_list, segment, max_leaves, gt)
-        total_obs_num = add_segment(vrelation_list, treelist, total_obs_num, gt, index, prediction, word_vectors)
+        total_node_num = add_segment(vrelation_list, treelist, total_node_num, gt, index, prediction, word_vectors)
         max_leaves = select(treelist)
         #print(max_leaves)
         pruning(treelist, max_leaves)
@@ -598,8 +582,5 @@ def mht_association(gt, short_term_relations, word_vectors):
         
     #print("/nGenerate_total_results/n")
     generate_results(treelist, vrelation_list, max_leaves, gt)
-    #del_data(tree_list, max_leaves)
 
-    #print('end')
-    print(short_term_relations[0][0])
     return vrelation_list

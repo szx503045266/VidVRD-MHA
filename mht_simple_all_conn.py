@@ -21,6 +21,9 @@ from baseline.association import *
 from baseline.association import _traj_iou, _merge_trajs
 from baseline.trajectory import *
 
+#from util.trajectory import *
+#from association.videorelation import _merge_trajs, _traj_iou
+
 class Node(object):
     
     def __init__(self, obs_id, id, segment, parent_id, child_id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, rel_score):
@@ -44,7 +47,7 @@ class Tree(object):
 
     def __init__(self, segment, obs_id, id, s, p, o, s_score, p_score, o_score, s_traj, o_traj, conf_score):
         self.nodes = dict()
-        self.nodes[1] = Node(obs_id, 1, segment, -1, [], s, p, o, s_score, p_score, o_score, s_traj, o_traj, (conf_score, conf_score))
+        self.nodes[1] = Node(obs_id, 1, segment, -1, [], s, p, o, s_score, p_score, o_score, s_traj, o_traj, (conf_score, conf_score/10))  ######
         self.node_num = 1
         self.leaflist = [1]
 
@@ -601,5 +604,4 @@ def mht_association(gt, short_term_relations, word_vectors):
     #del_data(tree_list, max_leaves)
 
     #print('end')
-    print(short_term_relations[0][0])
     return vrelation_list

@@ -1,9 +1,10 @@
 import os
 import json
 import argparse
-#import gensim
+import gensim
 import pickle as pkl
 import numpy as np
+import multiprocessing
 from collections import defaultdict
 
 from tqdm import tqdm
@@ -12,7 +13,7 @@ from dataset import VidVRD
 from baseline import segment_video, get_model_path
 from baseline import trajectory, feature, model, association
 
-from mht_simple import *
+from mht_simple_all_conn import *
 from bottomline import *
 
 def load_object_trajectory_proposal():
@@ -96,25 +97,46 @@ def detect():
         video_st_relations[vid].append((index, st_rel))
     #print(video_st_relations['ILSVRC2015_train_00914000'][0])
     
-    with open(os.path.join(get_model_path(), 'video_st_relations.pkl'), 'wb') as fout:
+    with open(os.path.join(get_model_path(), 'video_st_relations_sotop2.pkl'), 'wb') as fout:
         pkl.dump(video_st_relations, fout)
     
     '''
-    with open(os.path.join(get_model_path(), 'video_st_relations.pkl'), 'rb') as fin:
-        video_st_relations = pkl.load(fin)
     
+    with open(os.path.join(get_model_path(), 'video_st_relations_sotop2.pkl'), 'rb') as fin:
+        video_st_relations = pkl.load(fin)
+    '''
+    with open('/home/szx/Files/VVRD/vidvrd-baseline-output/datasetGCN/test_result/video_st_relations.pkl', 'rb') as fin:
+        video_st_relations = pkl.load(fin)
+    '''
     #Word2vec
-    #print('loading word vectors...')
-    #word_vectors = gensim.models.KeyedVectors.load_word2vec_format('word2vec/GoogleNews-vectors-negative300.bin.gz', binary=True)
-    #print('Word vectors loaded.')
+    '''
+    print('loading word vectors...')
+    word_vectors = gensim.models.KeyedVectors.load_word2vec_format('word2vec/GoogleNews-vectors-negative300.bin.gz', binary=True)
+    print('Word vectors loaded.')
+    '''
     
     # video-level visual relation detection by relational association
     print('mht relational association ...')
+    
+    vid_list, video_st_relations_list = list(zip(*list(video_st_relations.items())))
+    res_list = []
+    pool = multiprocessing.Pool(processes=12)
+    for re in video_st_relations_list:
+        res_list.append(pool.apply_async(mht_association, (dataset, re, [])))
+    pool.close()
+    pool.join()
+
+    video_relations = dict()
+    for i, vid in enumerate(vid_list):
+        video_relations[vid] = res_list[i].get()
+    
+    '''
     video_relations = dict()
     
     for vid in tqdm(video_st_relations.keys()):
         video_relations[vid] = mht_association(dataset, video_st_relations[vid])
     #video_relations['ILSVRC2015_train_00914000'] = mht_association(dataset, video_st_relations['ILSVRC2015_train_00914000'])
+    '''
     
     # save detection result
     with open(os.path.join(get_model_path(), 'mht_relation_prediction.json'), 'w') as fout:

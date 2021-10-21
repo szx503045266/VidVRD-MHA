@@ -132,6 +132,24 @@ class DataGenerator(FeatureExtractor):
                 return None
             index = self.index[i]
             pairs, feats, iou, trackid = self.extract_feature( *index)
+            
+            ########## delete the tracklet with low viou with gt for prediction ###########
+            '''
+            for idx,tid in enumerate(trackid):
+                if tid >= 0:
+                    gt_start = idx
+                    break
+            for idx,tid in enumerate(trackid[:gt_start]):
+                gt_idx = np.argmax(iou[idx][gt_start:])
+                if iou[idx][gt_start + gt_idx] < 0.5:
+                    trackid[idx] = -2
+            #print(trackid)
+            
+            test_inds = [ind for ind, (traj1, traj2) in enumerate(pairs)
+                    if trackid[traj1] == -1 and trackid[traj2] == -1]
+            '''
+            ###############################################################################
+            
             test_inds = [ind for ind, (traj1, traj2) in enumerate(pairs)
                     if trackid[traj1] < 0 and trackid[traj2] < 0]
             pairs = pairs[test_inds]
@@ -258,23 +276,31 @@ def predict(dataset, param):
     while data:
         # get all possible pairs and the respective features and annos
         index, pairs, feats, iou, trackid = data
+        
         # make prediction
         p = feats.dot(w) + b
         s = feats[:, :35]
         o = feats[:, 35: 70]
         predictions = []
         for i in range(len(pairs)):
-            top_s_ind = np.argsort(s[i])[-param['pair_topk']:]
+        
+            #top_s_ind = np.argsort(s[i])[-param['pair_topk']:]
+            top_s_ind = np.argsort(s[i])[-2:]
             top_p_ind = np.argsort(p[i])[-param['pair_topk']:]
-            top_o_ind = np.argsort(o[i])[-param['pair_topk']:]
+            top_o_ind = np.argsort(o[i])[-2:]
+            #top_o_ind = np.argsort(o[i])[-param['pair_topk']:]
             score = s[i][top_s_ind, None, None]*p[i][None, top_p_ind, None]*o[i][None, None, top_o_ind]
+            #score = p[i][None, top_p_ind, None]
+            
             top_flat_ind = np.argsort(score, axis = None)[-param['pair_topk']:]
             top_score = score.ravel()[top_flat_ind]
             top_s, top_p, top_o = np.unravel_index(top_flat_ind, score.shape)
+            #print(top_s, top_p, top_o, top_score)
             predictions.extend((
                     top_score[j], 
                     (top_s_ind[top_s[j]], top_p_ind[top_p[j]], top_o_ind[top_o[j]]), 
-                    tuple(pairs[i])) 
+                    tuple(pairs[i]), 
+                    (s[i][top_s_ind[top_s[j]]], p[i][top_p_ind[top_p[j]]], o[i][top_o_ind[top_o[j]]]))
                     for j in range(top_score.size))
         predictions = sorted(predictions, key=lambda x: x[0], reverse=True)[:param['seg_topk']]
         short_term_relations[index] = (predictions, iou, trackid)
